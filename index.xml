@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="Juno ReaPack Scripts" commit="3dc4224261fae7caa515666ae6cab2fb31003b1a">
+<index version="1" name="Juno ReaPack Scripts" commit="51a010fb2561a384a39a0a5827c3fb5eee8a12e7">
   <category name="Items">
     <reapack name="juno_FrameShift.lua" type="script" desc="juno: Frame shift (move item content by frames)">
       <metadata>
@@ -87,9 +87,11 @@
 
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 juno: MIDI Export Helper\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Prepares a project for MIDI export: for every track you tick, it creates MIDI tracks at the top of the project, above a track spacer. The original tracks are never changed (only the spacer is set on the first original track, since REAPER attaches spacers to the track below them).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b MIDI tracks}: all MIDI items are merged into one item (from =START to =END if those markers exist). If notes play at the same time, the voices are also split, using juno_SplitVoices' logic, into a folder: the folder track holds the full MIDI, the tracks inside it one voice each. Drum tracks (MIDI channel 10, or "drum"/"kit"/"perc" in the name) are split one track per note instead. The split settings can be changed per track.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b MIDI tracks}: all MIDI items are merged into one item (from =START to =END if those markers exist). If notes play at the same time, the voices are also split, using juno_SplitVoices' logic, into a folder: the folder track holds the full MIDI, the tracks inside it one voice each. Drum tracks are split one track per note instead; they are recognised by drum words (kick, snare, hat, toms, drums, perc, 808...) in the track name, in the folders above it or in its instrument plugin, or by notes on MIDI channel 10. The split settings can be changed per track.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Sample tracks} (audio/video items with pitch applied): one note per item, with the item's length, its pitch (relative to a base note) and a velocity from its volume (quietest = 1, loudest = 127). Pitch envelopes become pitch bend (range +/-12, or more octaves if a slide goes further). Items from different files, or from different parts of the same file, become separate tracks in a folder. You can override this per track.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Clicking a track in the list selects it in REAPER, and selecting a track in REAPER highlights it in the list. Ticked tracks show a small preview of the notes, coloured by the track they will end up on.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Each created track starts with a MIDI text event naming its source: the instrument plugin of the original track, or the sample file(s).\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Clicking a track in the list selects it in REAPER, and selecting a track in REAPER highlights it in the list. Ticked tracks show a small preview of the notes, coloured by the track they will end up on. A warnings column (shown only when needed) lists what the export changes or drops: muted items, notes cut at the export range, pitches rounded or clamped, pitch slides that clash.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Rows are selected like files (click, Ctrl/Cmd+click, Shift+click), in sync with REAPER's track selection; ticking, split modes and voice settings changed on a selected row apply to every selected track. Tick buttons (all / none / MIDI tracks / sample tracks) and a filter box help with big projects. "Remove all exports" deletes every track the script created.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Tracks made by the script are tagged, so they never show up for export again. Exporting a track again asks whether to replace its earlier export or add new copies.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Requires ReaImGui (ReaTeam Extensions repository; 0.10 or newer to show non-Latin names, e.g. Japanese) and juno_SplitVoices (this repository).\par}
 }
@@ -99,6 +101,19 @@
         <changelog><![CDATA[Initial release.]]></changelog>
         <source main="main">https://github.com/juno14k/reaper-scripts/raw/3dc4224261fae7caa515666ae6cab2fb31003b1a/MIDI/juno_MIDIExportHelper.lua</source>
         <source file="juno_MIDIExportHelper/lib.lua">https://github.com/juno14k/reaper-scripts/raw/3dc4224261fae7caa515666ae6cab2fb31003b1a/MIDI/juno_MIDIExportHelper/lib.lua</source>
+      </version>
+      <version name="1.0.1" author="juno" time="2026-11-19T18:49:10Z">
+        <changelog><![CDATA[- Select tracks like files (click, Ctrl/Cmd+click, Shift+click), in sync with REAPER's track selection;
+  ticking, split modes and voice settings apply to every selected track
+- Clearer selection highlight
+- Warnings column: muted items, notes cut at the export range, rounded or clamped pitches, clashing slides
+- "Remove all exports" button (with confirmation)
+- Tick buttons for all / none / MIDI tracks / sample tracks, and a filter box
+- Each created track starts with a text event naming its instrument plugin or source file(s)
+- Better drum detection: drum words in the track name, its folders or its instrument plugin
+- Fixed: previews drawn over other parts of the window; crash with folder rows]]></changelog>
+        <source main="main">https://github.com/juno14k/reaper-scripts/raw/51a010fb2561a384a39a0a5827c3fb5eee8a12e7/MIDI/juno_MIDIExportHelper.lua</source>
+        <source file="juno_MIDIExportHelper/lib.lua">https://github.com/juno14k/reaper-scripts/raw/51a010fb2561a384a39a0a5827c3fb5eee8a12e7/MIDI/juno_MIDIExportHelper/lib.lua</source>
       </version>
     </reapack>
     <reapack name="juno_SplitVoices.lua" type="script" desc="juno: Split MIDI voices into tracks">
@@ -165,7 +180,7 @@
 {\pard \ql \f0 \sa180 \li0 \fi0 How to install:\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab go to Extensions \u8594 ? ReaPack \u8594 ? Import repositories...\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab paste {\f1 https://github.com/juno14k/reaper-scripts/raw/master/index.xml}\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab install the scripts from {\f1 Browse packages} (search {\f1 juno_}).\sa180\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab install the scripts from {\f1 Browse packages} (search {\f1 juno}).\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Disclaimer: all the scripts are vibe-coded.\par}
 }
 ]]></description>
