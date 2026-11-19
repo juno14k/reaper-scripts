@@ -14,17 +14,28 @@
 --
 --   - **MIDI tracks**: all MIDI items are merged into one item (from =START to =END if those markers exist).
 --     If notes play at the same time, the voices are also split, using juno_SplitVoices' logic, into a folder:
---     the folder track holds the full MIDI, the tracks inside it one voice each. Drum tracks (MIDI channel 10,
---     or "drum"/"kit"/"perc" in the name) are split one track per note instead. The split settings can be
---     changed per track.
+--     the folder track holds the full MIDI, the tracks inside it one voice each. Drum tracks are split one
+--     track per note instead; they are recognised by drum words (kick, snare, hat, toms, drums, perc, 808...)
+--     in the track name, in the folders above it or in its instrument plugin, or by notes on MIDI channel 10.
+--     The split settings can be changed per track.
 --   - **Sample tracks** (audio/video items with pitch applied): one note per item, with the item's length,
 --     its pitch (relative to a base note) and a velocity from its volume (quietest = 1, loudest = 127).
 --     Pitch envelopes become pitch bend (range +/-12, or more octaves if a slide goes further).
 --     Items from different files, or from different parts of the same file, become separate tracks in a
 --     folder. You can override this per track.
 --
+--   Each created track starts with a MIDI text event naming its source: the instrument plugin of the original
+--   track, or the sample file(s).
+--
 --   Clicking a track in the list selects it in REAPER, and selecting a track in REAPER highlights it in the list.
---   Ticked tracks show a small preview of the notes, coloured by the track they will end up on.
+--   Ticked tracks show a small preview of the notes, coloured by the track they will end up on. A warnings
+--   column (shown only when needed) lists what the export changes or drops: muted items, notes cut at the
+--   export range, pitches rounded or clamped, pitch slides that clash.
+--
+--   Rows are selected like files (click, Ctrl/Cmd+click, Shift+click), in sync with REAPER's track selection;
+--   ticking, split modes and voice settings changed on a selected row apply to every selected track.
+--   Tick buttons (all / none / MIDI tracks / sample tracks) and a filter box help with big projects.
+--   "Remove all exports" deletes every track the script created.
 --
 --   Tracks made by the script are tagged, so they never show up for export again. Exporting a track again
 --   asks whether to replace its earlier export or add new copies.
@@ -138,7 +149,7 @@ end
 local ctx = ImGui.CreateContext(SCRIPT_NAME)
 local state = {
 	key = nil, rows = {}, range = nil, cache = {}, wide = false,
-	reaSel = nil, scrollPending = false,
+	reaSel = nil, scrollPending = false, sel = {}, anchor = nil,
 	status = nil, statusColor = 0x7FD67FFF, closeAfter = false, confirm = nil,
 }
 
@@ -167,6 +178,7 @@ local function refresh(force)
 	state.range = L.Range()
 	state.rows = {}
 	state.wide = false
+	state.exports = L.ExportedTracks()
 	for _, info in ipairs(L.Scan()) do
 		local row = { kind = info.kind, info = info }
 		if info.kind == "track" then
@@ -180,6 +192,19 @@ local function refresh(force)
 		if hasWideChars(info.name or "") then state.wide = true end
 		state.rows[#state.rows + 1] = row
 	end
+end
+
+local function setSelected(row, v)
+	row.selected = v
+	setTrackSetting(row.info.guid, "_sel", v and 1 or 0)
+end
+
+-- Rows hidden by the filter box (folder rows are hidden while filtering).
+local function visible(row)
+	if not state.filter or state.filter == "" then return true end
+	if row.kind ~= "track" then return false end
+	local name = ((row.plan and row.plan.name) or row.info.name or ""):lower()
+	return name:find(state.filter:lower(), 1, true) ~= nil
 end
 
 local function exportRows()
@@ -318,12 +343,30 @@ local MODE_NAME = {
 -- Mini piano roll of a plan: notes coloured by the output track they end up on.
 local ROLL_H = 38
 
-local function drawRoll(row, x0, x1)
+-- Visible part of the track table, in screen coordinates. Must be called inside the table (its scroll area is a
+-- child window): the window minus the frozen header row and the vertical scrollbar.
+local function tableView()
+	local wx, wy = ImGui.GetWindowPos(ctx)
+	local ww, wh = ImGui.GetWindowWidth(ctx) or 0, ImGui.GetWindowHeight(ctx) or 0
+	local headerH = ImGui.GetTextLineHeight(ctx) + 6
+	local scrollbar = (ImGui.GetScrollMaxY(ctx) or 0) > 0 and (ImGui.GetStyleVar(ctx, ImGui.StyleVar_ScrollbarSize) or 14) or 0
+	return { x0 = wx, y0 = wy + headerH, x1 = wx + ww - scrollbar, y1 = wy + wh }
+end
+
+-- The roll spans several columns, so it can't use the cell's clipping; `view` is the part of the table that is
+-- actually visible (below the frozen header, inside the scroll area), and drawing is clipped to it.
+local function drawRoll(row, x0, x1, view)
 	local roll = row.plan and row.plan.roll
 	local dl = ImGui.GetWindowDrawList(ctx)
 	local _, y0 = ImGui.GetCursorScreenPos(ctx)
 	local y1 = y0 + ROLL_H
-	ImGui.DrawList_PushClipRect(dl, x0, y0, x1, y1, false)
+	local cx0, cy0 = math.max(x0, view.x0), math.max(y0, view.y0)
+	local cx1, cy1 = math.min(x1, view.x1), math.min(y1, view.y1)
+	if cx1 <= cx0 or cy1 <= cy0 then -- scrolled out of view
+		ImGui.Dummy(ctx, 1, ROLL_H)
+		return
+	end
+	ImGui.DrawList_PushClipRect(dl, cx0, cy0, cx1, cy1, false)
 	ImGui.DrawList_AddRectFilled(dl, x0, y0, x1, y1, 0x1A1A1AFF, 3)
 	if roll and #roll.notes > 0 and roll.t1 > roll.t0 then
 		local lo, hi = roll.low - 1, roll.high + 1
@@ -363,10 +406,47 @@ end
 -- Track table
 -----------------------------------------------------------------------------------------------------------------------
 
-local function selectInReaper(track)
-	reaper.SetOnlyTrackSelected(track)
+-- The row selection IS REAPER's track selection (read every frame, written on click).
+local function readSelection()
+	state.sel, state.selFirst = {}, nil
+	for k = 0, reaper.CountSelectedTracks(0) - 1 do
+		local t = reaper.GetSelectedTrack(0, k)
+		state.sel[t] = true
+		state.selFirst = state.selFirst or t
+	end
+end
+
+-- Click on a row, like a file list: click = only this track, Ctrl/Cmd+click = add or remove it,
+-- Shift+click = the range from the last clicked row (Ctrl/Cmd+Shift adds the range to the selection).
+local function clickRow(i, row)
+	local mods = ImGui.GetKeyMods(ctx)
+	local ctrl, shift = (mods & ImGui.Mod_Ctrl) ~= 0, (mods & ImGui.Mod_Shift) ~= 0
+	if shift and state.anchor then
+		if not ctrl then reaper.SetOnlyTrackSelected(row.info.track) end
+		for k = math.min(state.anchor, i), math.max(state.anchor, i) do
+			local r = state.rows[k]
+			if r and visible(r) then reaper.SetTrackSelected(r.info.track, true) end
+		end
+	elseif ctrl then
+		reaper.SetTrackSelected(row.info.track, not state.sel[row.info.track])
+		state.anchor = i
+	else
+		reaper.SetOnlyTrackSelected(row.info.track)
+		state.anchor = i
+	end
+	readSelection()
+	state.reaSel = state.selFirst -- our own change: don't scroll the list
 	reaper.Main_OnCommand(40913, 0) -- Track: Vertical scroll selected tracks into view
-	state.reaSel = track
+end
+
+-- Edits made on a selected row apply to every selected (exportable) track; on any other row, to that row only.
+local function targets(row)
+	if not state.sel[row.info.track] then return { row } end
+	local out = {}
+	for _, r in ipairs(state.rows) do
+		if r.kind == "track" and state.sel[r.info.track] then out[#out + 1] = r end
+	end
+	return out
 end
 
 local function rowType(info)
@@ -377,19 +457,22 @@ end
 local function drawRow(i, row)
 	local info, plan = row.info, row.plan
 	local isTrack = row.kind == "track"
-	local selectedInReaper = info.track == state.reaSel
+	local selectedInReaper = state.sel[info.track] == true
 	ImGui.TableNextRow(ctx)
 	ImGui.PushID(ctx, tostring(i))
 
-	-- tint the row with the track colour
-	if info.color then
+	-- tint the row with the track colour; selected rows get a solid highlight instead (with tracks of every
+	-- colour, a light highlight wouldn't stand out), plus an outline drawn after the row
+	if selectedInReaper then
+		ImGui.TableSetBgColor(ctx, ImGui.TableBgTarget_RowBg0, (ImGui.GetStyleColor(ctx, ImGui.Col_HeaderActive) & ~0xFF) | 0xFF)
+	elseif info.color then
 		local r, g, b = reaper.ColorFromNative(info.color)
 		ImGui.TableSetBgColor(ctx, ImGui.TableBgTarget_RowBg0, rgba(r, g, b, isTrack and 0x40 or 0x22))
 	end
 
 	-- Track name (submitted first so the checkbox, drawn after it, gets the clicks)
 	ImGui.TableSetColumnIndex(ctx, 1)
-	if selectedInReaper and state.scrollPending then
+	if info.track == state.reaSel and state.scrollPending then
 		ImGui.SetScrollHereY(ctx, 0.3)
 		state.scrollPending = false
 	end
@@ -416,7 +499,19 @@ local function drawRow(i, row)
 	ImGui.PushStyleVar(ctx, ImGui.StyleVar_SelectableTextAlign, 0, 0.5)
 	if ImGui.Selectable(ctx, label .. "##name", selectedInReaper,
 			ImGui.SelectableFlags_SpanAllColumns | ImGui.SelectableFlags_AllowOverlap, 0, rowH) then
-		selectInReaper(info.track)
+		clickRow(i, row)
+	end
+	if selectedInReaper then -- white outline + bar on the left edge, on the row's own edges (cell padding included)
+		local _, padY = ImGui.GetStyleVar(ctx, ImGui.StyleVar_CellPadding)
+		padY = padY or 2
+		local ry0, ry1 = y - padY, y + rowH + padY
+		local v = tableView()
+		if ry1 > v.y0 and ry0 < v.y1 then
+			ImGui.DrawList_PushClipRect(dl, v.x0, v.y0, v.x1, v.y1, false)
+			ImGui.DrawList_AddRect(dl, v.x0 + 0.5, ry0 + 0.5, v.x1 - 0.5, ry1 - 0.5, 0xFFFFFFE6, 0, 0, 1.5)
+			ImGui.DrawList_AddRectFilled(dl, v.x0, ry0, v.x0 + 3, ry1, 0xFFFFFFFF)
+			ImGui.DrawList_PopClipRect(dl)
+		end
 	end
 	ImGui.PopStyleVar(ctx)
 	if not isTrack then ImGui.PopStyleColor(ctx) end
@@ -424,8 +519,12 @@ local function drawRow(i, row)
 	-- Checkbox
 	ImGui.TableSetColumnIndex(ctx, 0)
 	if isTrack then
+		-- room for the selection bar on the left edge (only when an item follows: ImGui asserts otherwise)
+		ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + 8)
 		local c, v = ImGui.Checkbox(ctx, "##sel", row.selected)
-		if c then row.selected = v; setTrackSetting(info.guid, "_sel", v and 1 or 0) end
+		if c then
+			for _, r in ipairs(targets(row)) do setSelected(r, v) end
+		end
 	end
 
 	if isTrack then
@@ -445,6 +544,7 @@ local function drawRow(i, row)
 				ImGui.Text(ctx, (s.samples and "MIDI: " or "") .. s.midi)
 				if row.midiMode == L.MIDI_AUTO and s.drumLike then
 					ImGui.SameLine(ctx); ImGui.TextDisabled(ctx, "(drums detected)")
+					if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Detected from " .. s.drumWhy) end
 				end
 			end
 			if s.samples then
@@ -457,18 +557,21 @@ local function drawRow(i, row)
 		end
 
 		ImGui.TableSetColumnIndex(ctx, 5)
-		local changed = false
+		local group = targets(row)
+		local also = #group > 1 and ("\n(applies to the %d selected tracks)"):format(#group) or ""
 		if #info.midi > 0 then
 			-- Until you pick one, the mode is chosen for you (Drums for drum tracks, else Voice leading)
 			local current = plan and plan.summary.midiMode or row.midiMode
 			for k, ic in ipairs(MIDI_ICONS) do
-				local tip = ic.tip
+				local tip = ic.tip .. also
 				if row.midiMode == L.MIDI_AUTO and current == ic.mode then
-					tip = tip .. (plan and plan.summary.drumLike and "\n(picked because this looks like a drum track)"
+					tip = tip .. (plan and plan.summary.drumLike and ("\n(picked: drums detected, " .. plan.summary.drumWhy .. ")")
 						or "\n(picked automatically)")
 				end
 				if iconButton("m" .. ic.mode, ic.glyph, current == ic.mode, tip, k, #MIDI_ICONS) then
-					row.midiMode = ic.mode; setTrackSetting(info.guid, "_midi", ic.mode); changed = true
+					for _, r in ipairs(group) do
+						if #r.info.midi > 0 then r.midiMode = ic.mode; setTrackSetting(r.info.guid, "_midi", ic.mode); planRow(r) end
+					end
 				end
 			end
 			ImGui.NewLine(ctx)
@@ -480,15 +583,26 @@ local function drawRow(i, row)
 				current = (plan and plan.summary.autoSplit) and L.SAMPLE_SPLIT or L.SAMPLE_ONE
 			end
 			for k, ic in ipairs(SAMPLE_ICONS) do
-				local tip = ic.tip
+				local tip = ic.tip .. also
 				if row.sampleMode == L.SAMPLE_AUTO and current == ic.mode then tip = tip .. "\n(picked automatically)" end
 				if iconButton("s" .. ic.mode, ic.glyph, current == ic.mode, tip, k, #SAMPLE_ICONS) then
-					row.sampleMode = ic.mode; setTrackSetting(info.guid, "_samp", ic.mode); changed = true
+					for _, r in ipairs(group) do
+						if #r.info.samples > 0 then r.sampleMode = ic.mode; setTrackSetting(r.info.guid, "_samp", ic.mode); planRow(r) end
+					end
 				end
 			end
 			ImGui.NewLine(ctx)
 		end
-		if changed then planRow(row) end
+
+		local warnings = plan and plan.summary.warnings or {}
+		if state.showWarnings and #warnings > 0 then
+			ImGui.TableSetColumnIndex(ctx, 6)
+			ImGui.TextColored(ctx, 0xFFC857FF, ("! %d warning%s"):format(#warnings, #warnings == 1 and "" or "s"))
+			if ImGui.IsItemHovered(ctx) and ImGui.BeginTooltip(ctx) then
+				for _, w in ipairs(warnings) do ImGui.BulletText(ctx, w) end
+				ImGui.EndTooltip(ctx)
+			end
+		end
 	end
 	ImGui.PopID(ctx)
 
@@ -497,41 +611,54 @@ local function drawRow(i, row)
 		ImGui.TableNextRow(ctx)
 		ImGui.TableSetColumnIndex(ctx, 1)
 		local rx = ImGui.GetCursorScreenPos(ctx)
-		local wx = ImGui.GetWindowPos(ctx)
-		drawRoll(row, rx, wx + ImGui.GetWindowWidth(ctx) - 16)
+		local v = tableView()
+		drawRoll(row, rx, v.x1, v)
 	end
 end
 
-local function focusedRow()
+local function selectedMidiRows()
+	local out = {}
 	for _, r in ipairs(state.rows) do
-		if r.kind == "track" and r.info.track == state.reaSel then return r end
+		if r.kind == "track" and state.sel[r.info.track] and #r.info.midi > 0 then out[#out + 1] = r end
 	end
+	return out
 end
 
 -----------------------------------------------------------------------------------------------------------------------
 -- Voice settings of the track selected in REAPER
 -----------------------------------------------------------------------------------------------------------------------
 
+local function rowMode(r) return r.plan and r.plan.summary.midiMode or r.midiMode end
+local function hasSettings(mode) return mode == L.MIDI_SPLIT_VL or mode == L.MIDI_SPLIT_TOP or mode == L.MIDI_SPLIT_FIRST end
+
+-- Shows the settings of the first selected track that has some; a change is applied to every selected MIDI track.
 local function drawVoiceSettings()
-	local row = focusedRow()
+	local rows = selectedMidiRows()
+	if #rows == 0 then
+		ImGui.TextDisabled(ctx, "Select MIDI tracks (in this list or in REAPER) to edit their voice settings.")
+		return
+	end
+	local row
+	for _, r in ipairs(rows) do if hasSettings(rowMode(r)) then row = r break end end
+	local function nameOf(r) return r.plan and r.plan.name or r.info.name end
 	if not row then
-		ImGui.TextDisabled(ctx, "Select a track (in this list or in REAPER) to see its voice settings.")
-		return
-	end
-	local mode = row.plan and row.plan.summary.midiMode or row.midiMode
-	if #row.info.midi == 0 then
-		ImGui.TextDisabled(ctx, (row.plan and row.plan.name or row.info.name) .. ": samples only, nothing else to set.")
-		return
-	end
-	ImGui.Text(ctx, (row.plan and row.plan.name or row.info.name) .. ": " .. (MODE_NAME[mode] or ""))
-	if mode == L.MIDI_NO_SPLIT or mode == L.MIDI_SPLIT_DRUMS then
+		local mode = rowMode(rows[1])
+		ImGui.Text(ctx, (#rows == 1 and nameOf(rows[1]) or (#rows .. " selected tracks")) .. ": " .. (MODE_NAME[mode] or ""))
 		ImGui.SameLine(ctx)
 		ImGui.TextDisabled(ctx, mode == L.MIDI_SPLIT_DRUMS and "(one track per note, no settings)" or "(no settings)")
 		return
 	end
+	local mode = rowMode(row)
+	if #rows == 1 then
+		ImGui.Text(ctx, nameOf(row) .. ": " .. (MODE_NAME[mode] or ""))
+	else
+		ImGui.Text(ctx, ("%d selected MIDI tracks"):format(#rows))
+		ImGui.SameLine(ctx)
+		ImGui.TextDisabled(ctx, ("(showing %s; changes apply to all of them)"):format(nameOf(row)))
+	end
 
-	local o, changed = row.split, false
-	local function apply(c, key, v) if c then o[key] = v; changed = true end end
+	local o, edits = row.split, {}
+	local function apply(c, key, v) if c then o[key] = v; edits[key] = v end end
 	ImGui.PushItemWidth(ctx, 160)
 	local c, v = ImGui.SliderInt(ctx, "Chord tolerance", o.chordTolMs, 0, 120, "%d ms")
 	apply(c, "chordTolMs", v)
@@ -543,7 +670,7 @@ local function drawVoiceSettings()
 
 	local auto = o.voiceCount == 0
 	c, v = ImGui.Checkbox(ctx, "Automatic voice count", auto)
-	if c then o.voiceCount = v and 0 or math.max(1, row.plan and row.plan.summary.voiceCount or 4); changed = true end
+	if c then apply(true, "voiceCount", v and 0 or 4) end
 	if o.voiceCount > 0 then
 		ImGui.SameLine(ctx, 0, 24)
 		c, v = ImGui.SliderInt(ctx, "Voices", o.voiceCount, 1, 16)
@@ -565,17 +692,47 @@ local function drawVoiceSettings()
 		help("How long a resting voice keeps 'its' last pitch.")
 	end
 	ImGui.PopItemWidth(ctx)
-	if ImGui.Button(ctx, "Reset voice settings") then row.split = defaultSplit(); changed = true end
+	local reset = ImGui.Button(ctx, #rows > 1 and "Reset voice settings (all selected)" or "Reset voice settings")
+	if reset then edits = defaultSplit() end
 
-	if changed then
-		setTrackSetting(row.info.guid, "_split", serializeSplit(row.split))
-		planRow(row)
+	if next(edits) then
+		for _, r in ipairs(rows) do
+			for k, v in pairs(edits) do r.split[k] = v end
+			setTrackSetting(r.info.guid, "_split", serializeSplit(r.split))
+			planRow(r)
+		end
 	end
 end
 
 -----------------------------------------------------------------------------------------------------------------------
 -- Window
 -----------------------------------------------------------------------------------------------------------------------
+
+local function drawConfirmRemove()
+	if not ImGui.BeginPopupModal(ctx, "Remove all exports", nil, ImGui.WindowFlags_AlwaysAutoResize) then return end
+	local list = state.exports or {}
+	ImGui.Text(ctx, ("This deletes all %d track%s created by this script:"):format(#list, #list == 1 and "" or "s"))
+	ImGui.Indent(ctx)
+	for k, n in ipairs(list) do
+		if k > 15 then ImGui.TextDisabled(ctx, ("...and %d more"):format(#list - 15)) break end
+		ImGui.BulletText(ctx, n ~= "" and n or "(unnamed)")
+	end
+	ImGui.Unindent(ctx)
+	ImGui.Spacing(ctx)
+	ImGui.TextColored(ctx, 0xFFC857FF, "Any edits you made on those tracks are lost (Undo brings them back).")
+	ImGui.TextDisabled(ctx, "Original tracks are not touched; the spacer added above them is removed.")
+	ImGui.Spacing(ctx)
+	if ImGui.Button(ctx, "Remove", 120, 0) then
+		ImGui.CloseCurrentPopup(ctx); state.confirmRemove = false
+		local n = L.RemoveAll()
+		state.status = ("Removed %d exported track%s."):format(n, n == 1 and "" or "s")
+		state.statusColor = 0x7FD67FFF
+		refresh(true)
+	end
+	ImGui.SameLine(ctx)
+	if ImGui.Button(ctx, "Cancel", 80, 0) then ImGui.CloseCurrentPopup(ctx); state.confirmRemove = false end
+	ImGui.EndPopup(ctx)
+end
 
 local function drawConfirm()
 	if not ImGui.BeginPopupModal(ctx, "Already exported", nil, ImGui.WindowFlags_AlwaysAutoResize) then return end
@@ -624,8 +781,8 @@ end
 
 local function drawUI()
 	refresh()
-	local sel = reaper.GetSelectedTrack(0, 0)
-	if sel ~= state.reaSel then state.reaSel = sel; state.scrollPending = true end
+	readSelection()
+	if state.selFirst ~= state.reaSel then state.reaSel = state.selFirst; state.scrollPending = true end
 
 	-- Range and global settings
 	local r = state.range
@@ -659,23 +816,39 @@ local function drawUI()
 	if nTracks == 0 then
 		ImGui.TextColored(ctx, 0xFFC857FF, "No tracks with MIDI or sample items.")
 	else
-		if ImGui.Button(ctx, "Select all") then
+		-- Ticking: buttons act on the tracks shown (after filtering)
+		local function tickWhere(pred)
 			for _, row in ipairs(state.rows) do
-				if row.kind == "track" then row.selected = true; setTrackSetting(row.info.guid, "_sel", 1) end
+				if row.kind == "track" and visible(row) then setSelected(row, pred(row)) end
 			end
 		end
+		ImGui.Text(ctx, "Tick:")
 		ImGui.SameLine(ctx)
-		if ImGui.Button(ctx, "Select none") then
-			for _, row in ipairs(state.rows) do
-				if row.kind == "track" then row.selected = false; setTrackSetting(row.info.guid, "_sel", 0) end
-			end
-		end
+		if ImGui.Button(ctx, "All") then tickWhere(function() return true end) end
+		ImGui.SameLine(ctx)
+		if ImGui.Button(ctx, "None") then tickWhere(function() return false end) end
+		ImGui.SameLine(ctx)
+		if ImGui.Button(ctx, "MIDI tracks") then tickWhere(function(r) return #r.info.midi > 0 end) end
+		ImGui.SameLine(ctx)
+		if ImGui.Button(ctx, "Sample tracks") then tickWhere(function(r) return #r.info.samples > 0 end) end
+		help("These act on the tracks shown (use the filter to narrow them down).\n\n"
+			.. "Select rows like files: click, Ctrl/Cmd+click to add or remove, Shift+click for a range. "
+			.. "The selection is REAPER's track selection. Ticking a checkbox, choosing a split mode or editing "
+			.. "voice settings on a selected row applies to every selected track.")
+		ImGui.SameLine(ctx, 0, 20)
+		ImGui.SetNextItemWidth(ctx, 180)
+		local cf, f = ImGui.InputTextWithHint(ctx, "##filter", "Filter tracks", state.filter or "")
+		if cf then state.filter = f end
 
 		local flags = ImGui.TableFlags_RowBg | ImGui.TableFlags_BordersInnerH | ImGui.TableFlags_ScrollY
 			| ImGui.TableFlags_SizingFixedFit
 		-- leave room for: splitter, "Voice settings" title, the settings panel, the buttons
 		local h = -(S.settingsH + 12 + ImGui.GetFrameHeightWithSpacing(ctx) * 2.5)
-		if ImGui.BeginTable(ctx, "tracks", 6, flags, 0, h) then
+		state.showWarnings = false
+		for _, row in ipairs(state.rows) do
+			if row.plan and #(row.plan.summary.warnings or {}) > 0 then state.showWarnings = true break end
+		end
+		if ImGui.BeginTable(ctx, "tracks", state.showWarnings and 7 or 6, flags, 0, h) then
 			ImGui.TableSetupScrollFreeze(ctx, 0, 1)
 			ImGui.TableSetupColumn(ctx, "")
 			ImGui.TableSetupColumn(ctx, "Track", ImGui.TableColumnFlags_WidthStretch)
@@ -683,15 +856,18 @@ local function drawUI()
 			ImGui.TableSetupColumn(ctx, "Items")
 			ImGui.TableSetupColumn(ctx, "Will create")
 			ImGui.TableSetupColumn(ctx, "Split")
+			if state.showWarnings then ImGui.TableSetupColumn(ctx, "Warnings") end
 			ImGui.TableHeadersRow(ctx)
-			for i, row in ipairs(state.rows) do drawRow(i, row) end
+			for i, row in ipairs(state.rows) do
+				if visible(row) then drawRow(i, row) end
+			end
 			ImGui.EndTable(ctx)
 		end
 	end
 
 	-- Voice settings for the track selected in REAPER
 	splitter()
-	ImGui.SeparatorText(ctx, "Voice settings")
+	ImGui.SeparatorText(ctx, "Voice settings (selected tracks)")
 	if ImGui.BeginChild(ctx, "voice", 0, S.settingsH) then
 		drawVoiceSettings()
 		ImGui.EndChild(ctx)
@@ -703,6 +879,13 @@ local function drawUI()
 	if ImGui.Button(ctx, ("Export (%d)"):format(n), 120, 0) then startExport() end
 	ImGui.EndDisabled(ctx)
 	ImGui.SameLine(ctx)
+	ImGui.BeginDisabled(ctx, #(state.exports or {}) == 0)
+	if ImGui.Button(ctx, "Remove all exports", 150, 0) then
+		state.confirmRemove = true
+		ImGui.OpenPopup(ctx, "Remove all exports")
+	end
+	ImGui.EndDisabled(ctx)
+	ImGui.SameLine(ctx)
 	if ImGui.Button(ctx, "Close", 80, 0) then state.closeAfter = true end
 	if state.status then
 		ImGui.SameLine(ctx)
@@ -710,6 +893,7 @@ local function drawUI()
 	end
 
 	drawConfirm()
+	drawConfirmRemove()
 end
 
 local function loop()
@@ -717,7 +901,7 @@ local function loop()
 	local visible, open = ImGui.Begin(ctx, SCRIPT_NAME, true, ImGui.WindowFlags_NoCollapse)
 	if visible then
 		drawUI()
-		if ImGui.IsWindowFocused(ctx) and ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) and not state.confirm then
+		if ImGui.IsWindowFocused(ctx) and ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) and not state.confirm and not state.confirmRemove then
 			state.closeAfter = true
 		end
 		ImGui.End(ctx)

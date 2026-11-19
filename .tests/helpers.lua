@@ -15,18 +15,30 @@ function H.ok(msg) print("  ok  " .. msg) end
 ---   ui.select = label prefix of the selectable clicked in the next frame
 ---   ui.show   = print the texts drawn
 ---   ui.popup  = whether a popup is open
+---   ui.toggle = id ("<PushID path>/<label>") of the checkbox clicked in the next frame
+---   ui.click  = id of the InvisibleButton clicked in the next frame
+---   ui.mods   = key modifiers held (ui.SHIFT)
+---   ui.inputs = { [label] = text typed into that text field }
 function H.imgui(extra)
-	local ui = { press = nil, select = nil, show = false, popup = false, texts = {} }
+	local ui = { press = nil, select = nil, show = false, popup = false, texts = {}, mods = 0, inputs = {}, SHIFT = 1, CTRL = 2 }
+	local ids = {}
+	local function id(label) return table.concat(ids, "/") .. "/" .. label end
 	local function out(t) ui.texts[#ui.texts + 1] = t; if ui.show then print("    | " .. t) end end
 	local function starts(l, p) return p ~= nil and l:find(p, 1, true) == 1 end
 	local Im = {
 		CreateContext = function() return {} end,
 		Begin = function() return true, true end,
 		Combo = function(_, _, c) return false, c end,
-		Checkbox = function(_, _, v) return false, v end,
+		Checkbox = function(_, l, v) if ui.toggle == id(l) then return true, not v end return false, v end,
+		PushID = function(_, s) ids[#ids + 1] = s end,
+		PopID = function() ids[#ids] = nil end,
+		GetKeyMods = function() return ui.mods end,
+		Mod_Shift = ui.SHIFT,
+		Mod_Ctrl = ui.CTRL,
+		InputTextWithHint = function(_, l, _, v) if ui.inputs[l] then return true, ui.inputs[l] end return false, v end,
 		InputInt = function(_, _, v) return false, v end,
 		InputDouble = function(_, _, v) return false, v end,
-		SliderInt = function(_, _, v) return false, v end,
+		SliderInt = function(_, l, v) if ui.inputs[l] ~= nil then return true, ui.inputs[l] end return false, v end,
 		SliderDouble = function(_, _, v) return false, v end,
 		BeginTable = function() return true end,
 		BeginChild = function() return true end,
@@ -39,6 +51,9 @@ function H.imgui(extra)
 		GetCursorScreenPos = function() return 0, 0 end,
 		GetWindowPos = function() return 0, 0 end,
 		GetWindowWidth = function() return 800 end,
+		GetWindowHeight = function() return 600 end,
+		GetStyleColor = function() return 0x4296FAFF end,
+		GetCursorPosX = function() return 0 end,
 		ColorConvertHSVtoRGB = function() return 1, 1, 1 end,
 		ColorConvertRGBtoHSV = function() return 0, 0, 0 end,
 		ColorConvertDouble4ToU32 = function() return 0 end,
@@ -48,13 +63,29 @@ function H.imgui(extra)
 		CloseCurrentPopup = function() ui.popup = false end,
 		Button = function(_, l) return starts(l, ui.press) end,
 		Selectable = function(_, l) out(l); return starts(l, ui.select) end,
-		InvisibleButton = function() return false end,
+		InvisibleButton = function(_, l) return ui.click == id(l) end,
 		Text = function(_, t) out(t) end,
 		BulletText = function(_, t) out("- " .. t) end,
 		TextColored = function(_, _, t) out("[" .. t .. "]") end,
 		TextDisabled = function(_, t) out("(" .. t .. ")") end,
 	}
 	for k, v in pairs(extra or {}) do Im[k] = v end
+
+	-- Dear ImGui rule (asserts in REAPER): after SetCursorPos*/SetCursorScreenPos an item must be submitted
+	-- before the row/cell/window ends. Moving the cursor marks it pending; submitting an item clears it.
+	local pending = false
+	local function moved() pending = true end
+	local function check(name) assert(not pending, name .. ": cursor moved with SetCursorPos and no item submitted after it") end
+	for _, f in ipairs({ "SetCursorPosX", "SetCursorPosY", "SetCursorPos", "SetCursorScreenPos" }) do Im[f] = moved end
+	for _, f in ipairs({ "Checkbox", "Selectable", "Button", "InvisibleButton", "Text", "TextColored", "TextDisabled",
+		"BulletText", "Dummy", "Combo", "SliderInt", "SliderDouble", "InputInt", "InputDouble", "InputTextWithHint" }) do
+		local real = Im[f] or function() end
+		Im[f] = function(...) pending = false; return real(...) end
+	end
+	for _, f in ipairs({ "TableNextRow", "TableSetColumnIndex", "EndTable", "End", "EndChild" }) do
+		Im[f] = function() check(f) end
+	end
+
 	setmetatable(Im, { __index = function(_, k)
 		if k:match("^%u%w*_") and not k:match("^DrawList_") then return 0 end -- constants (Col_Text...)
 		return function() end
@@ -98,7 +129,7 @@ end
 function H.frame(ui, getDeferred, press, select)
 	ui.press, ui.select, ui.texts = press, select, {}
 	getDeferred()()
-	ui.press, ui.select = nil, nil
+	ui.press, ui.select, ui.toggle, ui.click, ui.inputs = nil, nil, nil, nil, {}
 	return table.concat(ui.texts, "\n")
 end
 

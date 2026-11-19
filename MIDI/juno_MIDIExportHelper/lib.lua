@@ -13,6 +13,7 @@
 local M = {}
 
 M.TAG    = "P_EXT:juno_MIDIExport"
+M.EXT    = "juno_MIDIExportHelper" -- project ExtState section (also used by the UI)
 M.PREFIX = "MIDI: "
 
 -- MIDI split modes. AUTO = Drums if the track looks like drums, else Voice leading.
@@ -128,12 +129,15 @@ function M.Scan()
 		if M.GetTag(tr) == "" then
 			local info = {
 				kind = "track", track = tr, guid = reaper.GetTrackGUID(tr), index = ti, name = trackName(tr), level = level,
+				folders = (function() local o = {} for _, a in ipairs(stack) do o[#o + 1] = a.row.name end return o end)(),
 				midi = {}, samples = {}, color = trackColor(tr),
 			}
 			for ii = 0, reaper.CountTrackMediaItems(tr) - 1 do
 				local item = reaper.GetTrackMediaItem(tr, ii)
 				local take = reaper.GetActiveTake(item)
-				if take and reaper.GetMediaItemInfo_Value(item, "B_MUTE") < 0.5 then
+				if take and reaper.GetMediaItemInfo_Value(item, "B_MUTE") >= 0.5 then
+					info.muted = (info.muted or 0) + 1
+				elseif take then
 					if reaper.TakeIsMIDI(take) then
 						table.insert(info.midi, item)
 					else
@@ -167,7 +171,9 @@ end
 
 --- Cheap fingerprint of everything Plan() reads from a track, to avoid recomputing unchanged tracks.
 function M.ContentKey(info)
-	local parts = { trackName(info.track) }
+	local parts = { trackName(info.track), tostring(info.muted or 0), table.concat(info.folders or {}, "/") }
+	local fx = reaper.TrackFX_GetInstrument(info.track)
+	if fx and fx >= 0 then parts[#parts + 1] = select(2, reaper.TrackFX_GetFXName(info.track, fx, "")) end
 	for _, item in ipairs(info.midi) do
 		local take = reaper.GetActiveTake(item)
 		parts[#parts + 1] = ("%.9f,%.9f,%d"):format(reaper.GetMediaItemInfo_Value(item, "D_POSITION"),
@@ -208,16 +214,38 @@ function M.Existing()
 	return bySrc
 end
 
---- Drums: the name says so, or most notes are on MIDI channel 10.
-function M.LooksLikeDrums(name, notes)
-	local lower = (name or ""):lower()
-	for _, w in ipairs({ "drum", "kit", "perc", "batteria" }) do
-		if lower:find(w, 1, true) then return true end
+-- Whole words that mean drums, and pieces that mean drums anywhere in a word ("drum" in "Drums", "EZdrummer").
+local DRUM_WORDS = {}
+for w in ([[kick kicks snare snares hat hats hihat hihats hh tom toms cymbal cymbals crash ride clap claps
+	perc percussion kit drumkit 808 909]]):gmatch("%S+") do DRUM_WORDS[w] = true end
+local DRUM_PIECES = { "drum", "kick", "snare", "hihat", "cymbal", "percuss" }
+
+--- The first word or piece of `text` that means drums, or nil.
+function M.DrumWord(text)
+	local lower = (text or ""):lower()
+	for word in lower:gmatch("%w+") do
+		if DRUM_WORDS[word] then return word end
 	end
+	for _, piece in ipairs(DRUM_PIECES) do
+		if lower:find(piece, 1, true) then return piece end
+	end
+end
+
+--- Whether a MIDI track looks like drums, and why ("name: kick", "folder 'Drums'", "instrument", "channel 10").
+--- Checks the track name, the folders it is in, its instrument plugin's name, then MIDI channel 10.
+function M.LooksLikeDrums(info, notes, instrument)
+	local w = M.DrumWord(info.name)
+	if w then return true, ("'%s' in the track name"):format(w) end
+	for k = #(info.folders or {}), 1, -1 do
+		local f = info.folders[k]
+		if M.DrumWord(f) then return true, ("in the folder '%s'"):format(f) end
+	end
+	if instrument and M.DrumWord(instrument) then return true, ("instrument '%s'"):format(instrument) end
 	if #notes == 0 then return false end
 	local ch10 = 0
 	for _, n in ipairs(notes) do if n.chan == M.GM_DRUM_CHANNEL then ch10 = ch10 + 1 end end
-	return ch10 * 2 >= #notes
+	if ch10 * 2 >= #notes then return true, "notes on MIDI channel 10 (General MIDI drums)" end
+	return false
 end
 
 -----------------------------------------------------------------------------------------------------------------------
@@ -240,6 +268,7 @@ end
 --- { notes = { {t0, t1, pitch, vel, chan} }, ccs = { {t, chanmsg, chan, msg2, msg3} } }
 function M.MergeMIDI(info, range)
 	local notes, ccs, lastBefore = {}, {}, {}
+	local clipped = 0 -- notes cut at the range edges
 	for _, item in ipairs(info.midi) do
 		local take = reaper.GetActiveTake(item)
 		local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
@@ -258,7 +287,10 @@ function M.MergeMIDI(info, range)
 					local t0, t1 = time(sp + off), time(ep + off)
 					if t0 >= pos - EPS and t0 < iEnd - EPS then
 						local c0, c1 = clipToRange(t0, min(t1, iEnd), range)
-						if c0 then notes[#notes + 1] = { t0 = c0, t1 = c1, pitch = pitch, vel = vel, chan = chan } end
+						if c0 then
+							notes[#notes + 1] = { t0 = c0, t1 = c1, pitch = pitch, vel = vel, chan = chan }
+							if t0 < range.s - EPS or min(t1, iEnd) > range.e + EPS then clipped = clipped + 1 end
+						end
 					end
 				end
 			end
@@ -286,7 +318,7 @@ function M.MergeMIDI(info, range)
 	end
 	for _, ev in pairs(lastBefore) do ev.t = range.s; ccs[#ccs + 1] = ev end
 	table.sort(ccs, function(a, b) return a.t < b.t end)
-	return { notes = trimSamePitch(notes), ccs = ccs }
+	return { notes = trimSamePitch(notes), ccs = ccs, clipped = clipped }
 end
 
 -----------------------------------------------------------------------------------------------------------------------
@@ -309,15 +341,19 @@ local function envValue(env, t)
 end
 
 --- Sample items grouped by source file + start position in the file (within `tol` seconds).
---- Each group: { file, offs, items = { {item, take, t0, t1, pitch, db, env} } }. Also returns min/max dB.
+--- Each group: { file, offs, items = { {item, take, t0, t1, pitch, db, env} } }. Also returns min/max dB and
+--- stats { clipped = items cut at the range edges, rounded = items pitched between two notes }.
 function M.SampleGroups(info, range, tol)
 	local byFile, files = {}, {}
 	local minDB, maxDB
+	local stats = { clipped = 0, rounded = 0 }
 	for _, item in ipairs(info.samples) do
 		local take = reaper.GetActiveTake(item)
 		local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
-		local t0, t1 = clipToRange(pos, pos + reaper.GetMediaItemInfo_Value(item, "D_LENGTH"), range)
+		local iEnd = pos + reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
+		local t0, t1 = clipToRange(pos, iEnd, range)
 		if t0 then
+			if pos < range.s - EPS or iEnd > range.e + EPS then stats.clipped = stats.clipped + 1 end
 			local src = rootSource(reaper.GetMediaItemTake_Source(take))
 			local file = reaper.GetMediaSourceFileName(src, "")
 			local rate = reaper.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE")
@@ -325,6 +361,7 @@ function M.SampleGroups(info, range, tol)
 			if reaper.GetMediaItemTakeInfo_Value(take, "B_PPITCH") < 0.5 and rate > 0 then
 				pitch = pitch + 12 * log(rate, 2) -- playrate changes the pitch too
 			end
+			if abs(pitch - round(pitch)) > 0.01 then stats.rounded = stats.rounded + 1 end
 			local vol = reaper.GetMediaItemInfo_Value(item, "D_VOL") * reaper.GetMediaItemTakeInfo_Value(take, "D_VOL")
 			local db = vol > 0 and 20 * log(vol, 10) or -150
 			minDB, maxDB = min(minDB or db, db), max(maxDB or db, db)
@@ -348,7 +385,7 @@ function M.SampleGroups(info, range, tol)
 			table.insert(g.items, e)
 		end
 	end
-	return groups, minDB, maxDB
+	return groups, minDB, maxDB, stats
 end
 
 --- Largest slide (semitones, absolute) among the items of the groups, from the envelope points.
@@ -380,13 +417,16 @@ local function velocity(db, minDB, maxDB)
 	return max(1, min(127, 1 + round((db - minDB) / (maxDB - minDB) * 126)))
 end
 
--- Notes (and pitch bends of slides) for the given groups.
+-- Notes (and pitch bends of slides) for the given groups, plus how many notes had to be clamped to 0..127 and
+-- how many sliding notes overlap another note (pitch bend is per channel, so their slides affect each other).
 local function sampleNotes(groups, baseNote, minDB, maxDB)
-	local notes, bends, maxSlide = {}, {}, 0
+	local notes, bends, maxSlide, clamped = {}, {}, 0, 0
 	for _, g in ipairs(groups) do
 		for _, e in ipairs(g.items) do
-			local pitch = max(0, min(127, baseNote + round(e.pitch)))
-			notes[#notes + 1] = { t0 = e.t0, t1 = e.t1, pitch = pitch, vel = velocity(e.db, minDB, maxDB), chan = 0 }
+			local raw = baseNote + round(e.pitch)
+			local pitch = max(0, min(127, raw))
+			if pitch ~= raw then clamped = clamped + 1 end
+			notes[#notes + 1] = { t0 = e.t0, t1 = e.t1, pitch = pitch, vel = velocity(e.db, minDB, maxDB), chan = 0, slide = e.env ~= nil }
 			if e.env then
 				local last = 0
 				local t = e.t0
@@ -403,7 +443,16 @@ local function sampleNotes(groups, baseNote, minDB, maxDB)
 			end
 		end
 	end
-	return trimSamePitch(notes), bends, maxSlide
+	notes = trimSamePitch(notes)
+	local clashes = 0
+	for i, n in ipairs(notes) do
+		if n.slide then
+			for j, o in ipairs(notes) do
+				if i ~= j and o.t0 < n.t1 - EPS and n.t0 < o.t1 - EPS then clashes = clashes + 1; break end
+			end
+		end
+	end
+	return notes, bends, maxSlide, clamped, clashes
 end
 
 -----------------------------------------------------------------------------------------------------------------------
@@ -444,15 +493,27 @@ function M.Plan(info, opts)
 	SPLIT_MODE_OF[M.MIDI_SPLIT_DRUMS] = Core.MODE_DRUMS
 
 	local outputs, summary = {}, {}
+	local warnings = {}
+	local function warn(n, fmt) if n and n > 0 then warnings[#warnings + 1] = fmt:format(n, n == 1 and "" or "s") end end
 	local both = #info.midi > 0 and #info.samples > 0
-	local groups, minDB, maxDB
-	if #info.samples > 0 then groups, minDB, maxDB = M.SampleGroups(info, opts.range, opts.tol) end
+	local groups, minDB, maxDB, sstats
+	if #info.samples > 0 then groups, minDB, maxDB, sstats = M.SampleGroups(info, opts.range, opts.tol) end
 	local name = displayName(info, groups)
+	warn(info.muted, "%d muted item%s skipped")
 
 	-- MIDI part
 	if #info.midi > 0 then
 		local merged = M.MergeMIDI(info, opts.range)
-		summary.drumLike = M.LooksLikeDrums(info.name, merged.notes)
+		warn(merged.clipped, "%d MIDI note%s cut at the export range")
+		-- text event at the start of each track: the instrument plugin of the original track
+		local text, fxName
+		local fx = reaper.TrackFX_GetInstrument(info.track)
+		if fx and fx >= 0 then
+			local _, n = reaper.TrackFX_GetFXName(info.track, fx, "")
+			if n and n ~= "" then fxName = n; text = "Instrument: " .. n end
+		end
+		summary.instrument = text
+		summary.drumLike, summary.drumWhy = M.LooksLikeDrums(info, merged.notes, fxName)
 		local midiMode = opts.midiMode
 		if not midiMode or midiMode == M.MIDI_AUTO then
 			midiMode = summary.drumLike and M.MIDI_SPLIT_DRUMS or M.MIDI_SPLIT_VL
@@ -474,7 +535,7 @@ function M.Plan(info, opts)
 		if voices then
 			summary.midi = voices.drums and ("folder: full MIDI + %d drum notes"):format(voices.numVoices)
 				or ("folder: full MIDI + %d voices"):format(voices.numVoices)
-			outputs[#outputs + 1] = { name = title, depth = 1, notes = merged.notes, ccs = merged.ccs }
+			outputs[#outputs + 1] = { name = title, depth = 1, notes = merged.notes, ccs = merged.ccs, text = text }
 			local per = {}
 			for v = 1, voices.numVoices do per[v] = {} end
 			for i, n in ipairs(merged.notes) do
@@ -488,12 +549,12 @@ function M.Plan(info, opts)
 					local gm = per[v][1] and per[v][1].chan == M.GM_DRUM_CHANNEL and Core.GM_DRUMS[pitch]
 					label = ("%s (%s%s)"):format(label, Core.PitchName(pitch), gm and (" " .. gm) or "")
 				end
-				outputs[#outputs + 1] = { name = label, depth = 0, child = v, notes = per[v], ccs = merged.ccs }
+				outputs[#outputs + 1] = { name = label, depth = 0, child = v, notes = per[v], ccs = merged.ccs, text = text }
 			end
 			outputs[#outputs].depth = -1
 		else
 			summary.midi = #merged.notes > 0 and "1 track" or "1 track (no notes in range)"
-			outputs[#outputs + 1] = { name = title, depth = 0, notes = merged.notes, ccs = merged.ccs }
+			outputs[#outputs + 1] = { name = title, depth = 0, notes = merged.notes, ccs = merged.ccs, text = text }
 		end
 	end
 
@@ -505,9 +566,17 @@ function M.Plan(info, opts)
 		summary.autoSplit = #groups > 1
 		local perFile = {}
 		for _, g in ipairs(groups) do perFile[g.file] = (perFile[g.file] or 0) + 1 end
+		warn(sstats.clipped, "%d sample item%s cut at the export range")
+		warn(sstats.rounded, "%d item%s pitched between two notes: rounded to the nearest note")
+		local clamped, clashes = 0, 0
 		local function out(o, gs)
-			local notes, bends, slide = sampleNotes(gs, opts.baseNote, minDB, maxDB)
+			local notes, bends, slide, nClamped, nClashes = sampleNotes(gs, opts.baseNote, minDB, maxDB)
+			clamped, clashes = clamped + nClamped, clashes + nClashes
 			o.notes, o.bends = notes, bends
+			-- text event at the start of each track: the source file(s)
+			local labels = {}
+			for _, g in ipairs(gs) do labels[#labels + 1] = groupLabel(g, perFile[g.file]) end
+			if #labels > 0 then o.text = "Source: " .. table.concat(labels, ", ") end
 			if #bends > 0 then
 				o.bendRange = M.BendRange(slide)
 				summary.bendRange = max(summary.bendRange or 0, o.bendRange)
@@ -525,7 +594,10 @@ function M.Plan(info, opts)
 			summary.samples = #groups > 0 and "1 track" or "1 track (no items in range)"
 			outputs[#outputs + 1] = out({ name = title, depth = 0 }, groups)
 		end
+		warn(clamped, "%d note%s outside the MIDI range (0-127): clamped")
+		warn(clashes, "%d sliding note%s overlap other notes on the same track: their pitch bends affect each other")
 	end
+	summary.warnings = warnings
 
 	-- Preview: every note once, tagged with the output track it ends up on (folder parents with children are
 	-- skipped, since they only repeat the children's notes).
@@ -567,6 +639,7 @@ end
 
 local function insertEvents(take, o, range)
 	local function ppq(t) return reaper.MIDI_GetPPQPosFromProjTime(take, t) end
+	if o.text then reaper.MIDI_InsertTextSysexEvt(take, false, false, ppq(range.s), 1, o.text) end -- FF 01 text event
 	for _, n in ipairs(o.notes) do
 		reaper.MIDI_InsertNote(take, false, false, ppq(n.t0), ppq(n.t1), n.chan, n.pitch, n.vel, true)
 	end
@@ -639,6 +712,7 @@ function M.Build(jobs, replace, range)
 			if M.GetTag(tr) == "" then
 				if reaper.GetMediaTrackInfo_Value(tr, "I_SPACER") ~= 1 then
 					reaper.SetMediaTrackInfo_Value(tr, "I_SPACER", 1)
+					reaper.SetProjExtState(0, M.EXT, "spacer", reaper.GetTrackGUID(tr)) -- so "Remove all" can undo it
 				end
 				break
 			end
@@ -650,6 +724,44 @@ function M.Build(jobs, replace, range)
 	reaper.UpdateArrange()
 	reaper.Undo_EndBlock("juno: MIDI export helper", -1)
 	return created
+end
+
+--- Names of every track made by this script (exports and old separator tracks).
+function M.ExportedTracks()
+	local list = {}
+	for ti = 0, reaper.CountTracks(0) - 1 do
+		local tr = reaper.GetTrack(0, ti)
+		if M.GetTag(tr) ~= "" then list[#list + 1] = trackName(tr) end
+	end
+	return list
+end
+
+--- Deletes every track made by this script and the spacer it added. Original tracks are not touched
+--- (apart from removing that spacer). Returns how many tracks were deleted.
+function M.RemoveAll()
+	reaper.Undo_BeginBlock()
+	reaper.PreventUIRefresh(1)
+	local deleted = 0
+	for ti = reaper.CountTracks(0) - 1, 0, -1 do
+		local tr = reaper.GetTrack(0, ti)
+		if M.GetTag(tr) ~= "" then reaper.DeleteTrack(tr); deleted = deleted + 1 end
+	end
+	local _, guid = reaper.GetProjExtState(0, M.EXT, "spacer")
+	if guid and guid ~= "" then
+		for ti = 0, reaper.CountTracks(0) - 1 do
+			local tr = reaper.GetTrack(0, ti)
+			if reaper.GetTrackGUID(tr) == guid then
+				if reaper.GetMediaTrackInfo_Value(tr, "I_SPACER") == 1 then reaper.SetMediaTrackInfo_Value(tr, "I_SPACER", 0) end
+				break
+			end
+		end
+		reaper.SetProjExtState(0, M.EXT, "spacer", "")
+	end
+	reaper.PreventUIRefresh(-1)
+	reaper.TrackList_AdjustWindows(false)
+	reaper.UpdateArrange()
+	reaper.Undo_EndBlock("juno: Remove MIDI exports", -1)
+	return deleted
 end
 
 return M

@@ -5,7 +5,7 @@ local H = dofile((debug.getinfo(1, "S").source:match("^@?(.*[\\/])") or "") .. "
 local TPS = H.TPS
 local ext, projExt, deferred = {}, {}, nil
 local tracks, markers, guidN = {}, {}, 0
-local selectedTrack, scrolled = nil, 0
+local scrolled = 0
 
 local function newTrack(name, depth)
 	guidN = guidN + 1
@@ -36,8 +36,15 @@ reaper = {
 	CountTracks = function() return #tracks end,
 	GetTrack = function(_, i) return tracks[i + 1] end,
 	GetTrackGUID = function(t) return t.guid end,
-	GetSelectedTrack = function() return selectedTrack end,
-	SetOnlyTrackSelected = function(t) selectedTrack = t end,
+	CountSelectedTracks = function() local n = 0 for _, t in ipairs(tracks) do if t.selected then n = n + 1 end end return n end,
+	GetSelectedTrack = function(_, i)
+		local k = 0
+		for _, t in ipairs(tracks) do
+			if t.selected then if k == i then return t end k = k + 1 end
+		end
+	end,
+	SetOnlyTrackSelected = function(t) for _, x in ipairs(tracks) do x.selected = false end t.selected = true end,
+	SetTrackSelected = function(t, v) t.selected = v end,
 	Main_OnCommand = function(id) if id == 40913 then scrolled = scrolled + 1 end end,
 	GetMediaTrackInfo_Value = function(t, k)
 		return ({ I_FOLDERDEPTH = t.depth, I_CUSTOMCOLOR = t.color, I_SPACER = t.spacer })[k]
@@ -75,6 +82,9 @@ reaper = {
 	MIDI_GetCC = function(tk, i) local c = tk.ccs[i + 1]; return true, false, false, c.ppq, c.chanmsg, 0, c.msg2, c.msg3 end,
 	MIDI_InsertNote = function(tk, _, _, s, e, ch, p, v) table.insert(tk.notes, { s = s, e = e, ch = ch, p = p, vel = v }) end,
 	MIDI_InsertCC = function(tk, _, _, ppq, cm, _, m2, m3) table.insert(tk.ccs, { ppq = ppq, chanmsg = cm, msg2 = m2, msg3 = m3 }) end,
+	MIDI_InsertTextSysexEvt = function(tk, _, _, ppq, typ, str) tk.texts = tk.texts or {}; table.insert(tk.texts, { ppq = ppq, type = typ, text = str }) end,
+	TrackFX_GetInstrument = function(t) return t.instrument and 0 or -1 end,
+	TrackFX_GetFXName = function(t) return true, t.instrument or "" end,
 	MIDI_Sort = function() end,
 	CreateNewMIDIItemInProj = function(tr, s, e) return midiItem(tr, s, e - s, {}) end,
 	GetTakeEnvelopeByName = function(tk) return tk.env end,
@@ -114,6 +124,8 @@ midiItem(piano, 0, 3, { N(0, 1920 * 1.5, 72), N(1920, 3840, 60), N(1920, 3840, 6
 	{ ccs = { { ppq = 0, chanmsg = 0xB0, msg2 = 64, msg3 = 127 }, { ppq = 2000, chanmsg = 0xB0, msg2 = 7, msg3 = 90 } } })
 -- looped 2-QN (1 s) source, item 3..5 s -> the note plays at 3 and 4 s
 midiItem(piano, 3, 2, { N(0, 960, 50) }, { loop = true, srcLenQN = 2 })
+midiItem(piano, 5, 1, { N(0, 960, 70) }).mute = 1 -- muted: skipped, with a warning
+piano.instrument = "VSTi: Pianoteq 8 (Modartt)"
 
 local voice = newTrack("") -- unnamed: named after its sample file
 sampleItem(voice, 1.0, 0.5, "C:/v/voice.mp4", 0, 1.0)
@@ -145,21 +157,64 @@ H.ok("folder parent shown in the list")
 
 -- clicking a row selects the track in REAPER; selecting in REAPER shows its voice settings
 frame(nil, "Piano")
-assert(selectedTrack == piano and scrolled == 1, "row click selects the track in REAPER")
+assert(piano.selected and scrolled == 1, "row click selects the track in REAPER")
 text = frame()
 assert(text:find("Piano: Voice leading"),"voice settings of the selected track:\n" .. text)
-selectedTrack = beat
+piano.selected, beat.selected = false, true
 text = frame()
 assert(text:find("Drums") and text:find("one track per note"), "selection from REAPER followed")
 H.ok("selection sync both ways")
 
-frame("Select all")
+-- Warnings column: Piano has a muted item and a note cut at =START; voice has a pitch between two notes
+text = frame()
+assert(text:find("%[! 2 warnings%]") and text:find("%[! 1 warning%]"), "warnings column:\n" .. text)
+H.ok("warnings column")
+
+-- Faster selection (row ids: 1 Band, 2 Piano, 3 voice, 4 Drums, 5 Chops, 6 Beat)
+local function ticked()
+	local o = {}
+	for _, t in ipairs(originals) do
+		if projExt["juno_MIDIExportHelper" .. t.guid .. "_sel"] == "1" then o[#o + 1] = t.name ~= "" and t.name or "voice" end
+	end
+	return table.concat(o, ",")
+end
+frame("MIDI tracks")
+assert(ticked() == "Piano,Beat", ticked())
+frame("None"); frame("Sample tracks")
+assert(ticked() == "voice,Drums,Chops", ticked())
+frame("None")
+frame("None")
+
+-- Multi-selection like a file list, in sync with REAPER (row ids: 1 Band, 2 Piano, 3 voice, 4 Drums, 5 Chops, 6 Beat)
+local function selectedNames()
+	local o = {}
+	for _, t in ipairs(originals) do if t.selected then o[#o + 1] = t.name ~= "" and t.name or "voice" end end
+	return table.concat(o, ",")
+end
+frame(nil, "voice")
+ui.mods = ui.SHIFT; frame(nil, "Chops"); ui.mods = 0
+assert(selectedNames() == "voice,Drums,Chops", "shift-click range: " .. selectedNames())
+ui.mods = ui.CTRL; frame(nil, "Drums"); ui.mods = 0
+assert(selectedNames() == "voice,Chops", "ctrl-click toggles: " .. selectedNames())
+ui.toggle = "3/##sel"; frame()
+assert(ticked() == "voice,Chops", "ticking a selected row ticks the whole selection: " .. ticked())
+ui.toggle = "4/##sel"; frame()
+assert(ticked() == "voice,Drums,Chops", "ticking an unselected row ticks only it: " .. ticked())
+frame("None")
+H.ok("multi-selection (click, shift, ctrl) synced with REAPER; ticking applies to the selection")
+ui.inputs["##filter"] = "dru"; frame()
+frame("All")
+assert(ticked() == "Drums", "filter + All: " .. ticked())
+ui.inputs["##filter"] = ""; frame()
+H.ok("tick buttons, filter")
+
+frame("All")
 frame("Export")
 print("    " .. names())
 
 -- originals untouched (except the spacer on the first one)
 for _, t in ipairs(originals) do assert(next(t.ext) == nil, "original tagged!") end
-assert(#piano.items == 2 and piano.name == "Piano" and voice.name == "" and piano.depth == -1 and band.depth == 1)
+assert(#piano.items == 3 and piano.name == "Piano" and voice.name == "" and piano.depth == -1 and band.depth == 1)
 assert(band.spacer == 1, "spacer above the first original track")
 for _, t in ipairs(tracks) do assert(t.ext["P_EXT:juno_MIDIExport"] ~= "separator", "no separator track") end
 H.ok("originals untouched, spacer instead of a separator track")
@@ -198,6 +253,15 @@ find("MIDI: Chops 1 (chop.mp4 @ 0.000)")
 assert(notesOf("MIDI: Chops 2 (chop.mp4 @ 2.500)")[1].p == 65)
 H.ok("sample folders (different files, parts of one file)")
 
+-- Text event at the start of each track: instrument (MIDI) or source file(s) (samples)
+local function firstText(name) local tk = find(name).items[1].take; return tk.texts and tk.texts[1] end
+assert(firstText("MIDI: Piano").text == "Instrument: VSTi: Pianoteq 8 (Modartt)" and firstText("MIDI: Piano").type == 1)
+assert(firstText("MIDI: Piano 2").text == "Instrument: VSTi: Pianoteq 8 (Modartt)")
+assert(firstText("MIDI: Drums 1 (kick.wav)").text == "Source: kick.wav")
+assert(firstText("MIDI: voice").text == "Source: voice.mp4")
+assert(firstText("MIDI: Beat") == nil, "no instrument, no text")
+H.ok("text events: instrument / source file")
+
 -- per-track voice settings: 2 voices with overflow on the nearest one
 projExt["juno_MIDIExportHelper" .. piano.guid .. "_split"] = "voiceCount=2,overflow=1"
 local count = #tracks
@@ -213,3 +277,35 @@ count = #tracks
 frame("Export"); frame("Create new copies")
 assert(#tracks == count + (count - #originals), "copies added")
 H.ok("create new copies")
+
+-- Remove all exports: only the originals are left, and the spacer the script added is gone
+frame("Remove all exports")
+assert(ui.popup, "remove confirmation")
+frame("Remove")
+assert(#tracks == #originals, "only originals left: " .. names())
+assert(band.spacer == 0, "spacer removed")
+for i, t in ipairs(originals) do assert(tracks[i] == t) end
+H.ok("remove all exports")
+
+-- Split mode and voice settings changed on a selected row apply to every selected track
+local function ps(t, key) return projExt["juno_MIDIExportHelper" .. t.guid .. key] end
+frame(nil, "Piano"); ui.mods = ui.CTRL; frame(nil, "Beat"); ui.mods = 0
+ui.click = "2/m4"; frame() -- "Don't split" on Piano's row
+assert(ps(piano, "_midi") == "4" and ps(beat, "_midi") == "4", "split mode applied to the selection")
+assert(ps(drums, "_midi") == nil, "unselected track untouched")
+ui.click = "2/m1"; frame() -- Voice leading
+ui.inputs["Chord tolerance"] = 55; frame()
+assert(ps(piano, "_split"):find("chordTolMs=55") and ps(beat, "_split"):find("chordTolMs=55"), "voice settings applied to the selection")
+H.ok("split mode and voice settings apply to the selection")
+
+-- Drum detection: drum words in the track name, the folders above it, or the instrument; else channel 10
+local L = dofile(H.REPO .. "MIDI/juno_MIDIExportHelper/lib.lua")
+assert(L.DrumWord("Kick In") == "kick" and L.DrumWord("HiHat") == "hihat" and L.DrumWord("Hi-Hat") == "hat")
+assert(L.DrumWord("EZdrummer 3") == "drum" and L.DrumWord("Toms") == "toms" and L.DrumWord("HH open") == "hh")
+assert(L.DrumWord("Custom Pad") == nil and L.DrumWord("Bottom") == nil and L.DrumWord("Piano") == nil, "no false positives")
+local yes, why = L.LooksLikeDrums({ name = "Synth", folders = { "Band", "Drums" } }, {})
+assert(yes and why:find("Drums"), "folder name")
+yes, why = L.LooksLikeDrums({ name = "Track 3", folders = {} }, {}, "VSTi: Addictive Drums 2 (XLN Audio)")
+assert(yes and why:find("instrument"), "instrument name")
+assert(not L.LooksLikeDrums({ name = "Strings", folders = { "Orchestra" } }, { { chan = 0 } }, "VSTi: Kontakt 7"))
+H.ok("drum detection: names, folders, instrument, channel 10")
