@@ -1,8 +1,16 @@
 -- @description juno: MIDI export helper (MIDI and pitched samples to MIDI tracks)
 -- @author juno
--- @version 1.0.0
+-- @version 1.0.1
 -- @changelog
---   Initial release.
+--   - Select tracks like files (click, Ctrl/Cmd+click, Shift+click), in sync with REAPER's track selection;
+--     ticking, split modes and voice settings apply to every selected track
+--   - Clearer selection highlight
+--   - Warnings column: muted items, notes cut at the export range, rounded or clamped pitches, clashing slides
+--   - "Remove all exports" button (with confirmation)
+--   - Tick buttons for all / none / MIDI tracks / sample tracks, and a filter box
+--   - Each created track starts with a text event naming its instrument plugin or source file(s)
+--   - Better drum detection: drum words in the track name, its folders or its instrument plugin
+--   - Fixed: previews drawn over other parts of the window; crash with folder rows
 -- @provides
 --   [nomain] juno_MIDIExportHelper/lib.lua
 -- @about
