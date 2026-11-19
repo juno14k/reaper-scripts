@@ -1,2 +1,173 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="Juno ReaPack Scripts"/>
+<index version="1" name="Juno ReaPack Scripts" commit="3dc4224261fae7caa515666ae6cab2fb31003b1a">
+  <category name="Items">
+    <reapack name="juno_FrameShift.lua" type="script" desc="juno: Frame shift (move item content by frames)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 juno: Frame shift\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Moves the content of the selected items (their take start offset) by whole video frames, without moving the items themselves. Frame rates are read from the video files (through ffprobe; the project frame rate is used if it can't be read).\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Key map scripts (no UI)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b juno_FrameShiftForward / juno_FrameShiftBackward}: every video moves by one of its own frames. Audio moves by the same timeline amount as the videos. If the videos have different frame rates, a message tells you, and audio moves by 1/60 s.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b juno_FrameSnap}: snaps the start offset of every selected video to its nearest whole frame (frames of the video itself, not the project grid). Nothing moves on the timeline; audio is left alone.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 juno_FrameShift (UI)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Move everything by the same amount: N frames at the detected FPS, N frames at a chosen FPS, or a fixed time. Optionally each video can use its own FPS instead.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Shows the FPS, playrate and offset (in frames) of every selected item.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Optional snapping of video offsets to whole frames and of item positions to the project frame grid.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab A Snap button that only snaps the video offsets, without moving by any frames.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Requires ReaImGui for the UI script. Frame rate detection needs ffprobe (in REAPER's UserPlugins folder or on PATH).\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0.0" author="juno" time="2026-11-19T15:37:10Z">
+        <changelog><![CDATA[Initial release.]]></changelog>
+        <source main="main">https://github.com/juno14k/reaper-scripts/raw/3dc4224261fae7caa515666ae6cab2fb31003b1a/Items/juno_FrameShift.lua</source>
+        <source main="main" file="juno_FrameShiftForward.lua">https://github.com/juno14k/reaper-scripts/raw/3dc4224261fae7caa515666ae6cab2fb31003b1a/Items/juno_FrameShiftForward.lua</source>
+        <source main="main" file="juno_FrameShiftBackward.lua">https://github.com/juno14k/reaper-scripts/raw/3dc4224261fae7caa515666ae6cab2fb31003b1a/Items/juno_FrameShiftBackward.lua</source>
+        <source main="main" file="juno_FrameSnap.lua">https://github.com/juno14k/reaper-scripts/raw/3dc4224261fae7caa515666ae6cab2fb31003b1a/Items/juno_FrameSnap.lua</source>
+        <source file="juno_FrameShift/lib.lua">https://github.com/juno14k/reaper-scripts/raw/3dc4224261fae7caa515666ae6cab2fb31003b1a/Items/juno_FrameShift/lib.lua</source>
+      </version>
+    </reapack>
+  </category>
+  <category name="MIDI">
+    <reapack name="juno_ExtendNotes.lua" type="script" desc="juno: Extend notes to the next note">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 juno: Extend Notes\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Extends every note so it ends where the next note starts (legato).\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Run it from the MIDI editor to work on the take being edited, or from the arrange view to work on the selected MIDI items. Only the selected notes are changed (all notes if none is selected).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab The next note can be the next note of any pitch, of the same pitch or of the same channel.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Notes that already overlap the next note can be trimmed or kept.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab An optional gap (ms, ticks or % of the distance) leaves some space before the next note.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab The last notes can be left alone or extended to the item end.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Requires ReaImGui (ReaTeam Extensions repository).\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0.0" author="juno" time="2026-11-19T15:37:10Z">
+        <changelog><![CDATA[Initial release.]]></changelog>
+        <source main="main midi_editor">https://github.com/juno14k/reaper-scripts/raw/3dc4224261fae7caa515666ae6cab2fb31003b1a/MIDI/juno_ExtendNotes.lua</source>
+        <source file="juno_ExtendNotes/core.lua">https://github.com/juno14k/reaper-scripts/raw/3dc4224261fae7caa515666ae6cab2fb31003b1a/MIDI/juno_ExtendNotes/core.lua</source>
+      </version>
+    </reapack>
+    <reapack name="juno_FixOverlaps.lua" type="script" desc="juno: Fix overlapping, duplicate and short MIDI notes">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 juno: Fix Overlaps\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Cleans up MIDI, for example after importing or recording it.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Run it from the MIDI editor to work on the take being edited, or from the arrange view to work on the selected MIDI items. Only the selected notes are checked (all notes if none is selected).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Duplicates}: notes of the same pitch starting at (almost) the same time. The longest one is kept.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Short notes}: notes shorter than a given length, including zero-length notes.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Same-pitch overlaps}: the earlier note is trimmed to where the next one starts, or both are merged into one long note.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Monophonic overlaps} (optional): trims overlaps between different pitches too, for mono lines.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Shows what it found before changing anything, and can select the affected notes so you can look at them.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Requires ReaImGui (ReaTeam Extensions repository).\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0.0" author="juno" time="2026-11-19T15:37:10Z">
+        <changelog><![CDATA[Initial release.]]></changelog>
+        <source main="main midi_editor">https://github.com/juno14k/reaper-scripts/raw/3dc4224261fae7caa515666ae6cab2fb31003b1a/MIDI/juno_FixOverlaps.lua</source>
+        <source file="juno_FixOverlaps/core.lua">https://github.com/juno14k/reaper-scripts/raw/3dc4224261fae7caa515666ae6cab2fb31003b1a/MIDI/juno_FixOverlaps/core.lua</source>
+      </version>
+    </reapack>
+    <reapack name="juno_MIDIExportHelper.lua" type="script" desc="juno: MIDI export helper (MIDI and pitched samples to MIDI tracks)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 juno: MIDI Export Helper\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Prepares a project for MIDI export: for every track you tick, it creates MIDI tracks at the top of the project, above a track spacer. The original tracks are never changed (only the spacer is set on the first original track, since REAPER attaches spacers to the track below them).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b MIDI tracks}: all MIDI items are merged into one item (from =START to =END if those markers exist). If notes play at the same time, the voices are also split, using juno_SplitVoices' logic, into a folder: the folder track holds the full MIDI, the tracks inside it one voice each. Drum tracks (MIDI channel 10, or "drum"/"kit"/"perc" in the name) are split one track per note instead. The split settings can be changed per track.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Sample tracks} (audio/video items with pitch applied): one note per item, with the item's length, its pitch (relative to a base note) and a velocity from its volume (quietest = 1, loudest = 127). Pitch envelopes become pitch bend (range +/-12, or more octaves if a slide goes further). Items from different files, or from different parts of the same file, become separate tracks in a folder. You can override this per track.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Clicking a track in the list selects it in REAPER, and selecting a track in REAPER highlights it in the list. Ticked tracks show a small preview of the notes, coloured by the track they will end up on.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Tracks made by the script are tagged, so they never show up for export again. Exporting a track again asks whether to replace its earlier export or add new copies.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Requires ReaImGui (ReaTeam Extensions repository; 0.10 or newer to show non-Latin names, e.g. Japanese) and juno_SplitVoices (this repository).\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0.0" author="juno" time="2026-11-19T15:37:10Z">
+        <changelog><![CDATA[Initial release.]]></changelog>
+        <source main="main">https://github.com/juno14k/reaper-scripts/raw/3dc4224261fae7caa515666ae6cab2fb31003b1a/MIDI/juno_MIDIExportHelper.lua</source>
+        <source file="juno_MIDIExportHelper/lib.lua">https://github.com/juno14k/reaper-scripts/raw/3dc4224261fae7caa515666ae6cab2fb31003b1a/MIDI/juno_MIDIExportHelper/lib.lua</source>
+      </version>
+    </reapack>
+    <reapack name="juno_SplitVoices.lua" type="script" desc="juno: Split MIDI voices into tracks">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 juno: Split Voices\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Splits polyphonic MIDI (chords, piano parts, choir writing...) into one track per voice.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Select one or more MIDI items and run the script. Notes from all selected items on the same track are analysed together, so a voice stays on the same track across items.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Modes\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b First Available}: as many tracks as the max number of simultaneous notes; each note goes to the first free track.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Top to Bottom}: notes of every chord are ranked by pitch (highest -> top track).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Voice Leading}: follows melodic lines, assigning each note to the free voice whose recent pitch is closest, while avoiding voice crossings.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Pitch Ranges}: split by keyboard split points (e.g. C4 for left/right hand).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Drums}: one track per note pitch (kick, snare, hi-hat... each on its own track).\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Features\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Chord and legato-overlap tolerances for humanized/played-in MIDI.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Fixed or automatic voice count, with overflow handling.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Live piano-roll preview coloured by voice.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Output tracks named, coloured, grouped in a folder, with the source FX chain copied.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab CC / pitch bend / sustain can go to all voices, the first voice only, or be removed.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Requires ReaImGui (ReaTeam Extensions repository).\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Limitation: looped MIDI items are analysed using their first loop iteration only.\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0.0" author="juno" time="2026-11-19T15:37:10Z">
+        <changelog><![CDATA[Initial release.]]></changelog>
+        <source main="main">https://github.com/juno14k/reaper-scripts/raw/3dc4224261fae7caa515666ae6cab2fb31003b1a/MIDI/juno_SplitVoices.lua</source>
+        <source file="juno_SplitVoices/core.lua">https://github.com/juno14k/reaper-scripts/raw/3dc4224261fae7caa515666ae6cab2fb31003b1a/MIDI/juno_SplitVoices/core.lua</source>
+      </version>
+    </reapack>
+  </category>
+  <category name="Tracks">
+    <reapack name="juno_BakeVolume.lua" type="script" desc="juno: Bake volume (move track fader volume into an FX, with revert)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 juno: Bake volume\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 For the selected tracks: moves the fader volume into a "Volume/Pan Adjustment" JSFX at the end of the FX chain and resets the fader to 0 dB. The sound doesn't change, because the fader also acts after all the FX.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Bake}: adds the plugin (or, if the track is already baked and the plugin is still last, adds the fader volume to it), then sets the fader to 0 dB.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Revert}: puts the plugin's gain back on the fader and removes the plugin. Only allowed while the bake plugin is still the last FX: if plugins were added after it, moving the gain back would change what those plugins receive.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Tracks with a volume envelope, a fader at -inf, or a volume outside the plugin's range are skipped.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Requires ReaImGui.\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0.0" author="juno" time="2026-11-19T15:37:10Z">
+        <changelog><![CDATA[Initial release.]]></changelog>
+        <source main="main">https://github.com/juno14k/reaper-scripts/raw/3dc4224261fae7caa515666ae6cab2fb31003b1a/Tracks/juno_BakeVolume.lua</source>
+      </version>
+    </reapack>
+  </category>
+  <metadata>
+    <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 Juno ReaPack Scripts\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 How to install:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab go to Extensions \u8594 ? ReaPack \u8594 ? Import repositories...\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab paste {\f1 https://github.com/juno14k/reaper-scripts/raw/master/index.xml}\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab install the scripts from {\f1 Browse packages} (search {\f1 juno_}).\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Disclaimer: all the scripts are vibe-coded.\par}
+}
+]]></description>
+  </metadata>
+</index>
