@@ -36,9 +36,9 @@ check({ N(0, 500, 60, false, 0), N(0, 400, 60, false, 1) }, { separateChans = 0 
 check({ N(0, 500, 60, true), N(400, 900, 60, true), N(1000, 1500, 62), N(1200, 1600, 62) }, nil,
 	"0-400:60 400-900:60 1000-1500:62 1200-1600:62", "selected notes only")
 
--- "Select affected notes" selects both notes of a conflict, so fixing the selection still finds it
+-- "Select affected" selects both notes of a conflict, so fixing the selection still finds it
 load({ N(0, 500, 60), N(400, 900, 60), N(1000, 1100, 64) })
-H.frame(ui, get, "Select affected notes")
+H.frame(ui, get, "Select affected")
 local t = s.take.notes
 assert(t[1].sel and t[2].sel and not t[3].sel, "both partners selected")
 H.frame(ui, get, "Fix")

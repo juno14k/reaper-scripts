@@ -118,9 +118,92 @@ function H.midiEditorReaper(s)
 			if e then n.e = e end
 		end,
 		MIDI_DeleteNote = function(t, i) table.remove(t.notes, i + 1) end,
+		CountSelectedMediaItems = function() return 0 end,
 		MIDI_Sort = function() end, MIDI_GetHash = function() return true, tostring(math.random()) end,
 		MarkTrackItemsDirty = function() end, Undo_BeginBlock2 = function() end, Undo_EndBlock2 = function() end,
 		PreventUIRefresh = function() end, UpdateArrange = function() end, GetProjectStateChangeCount = function() return 1 end,
+		defer = function(f) s.deferred = f end, atexit = function() end,
+	}
+end
+
+--- Fake REAPER project with items on tracks (for the item mode of ExtendNotes / FixOverlaps).
+--- s = { tracks = { {}, ... }, ext = {}, editorTake = take or nil }; build items with H.audioItem / H.midiItem.
+function H.audioItem(track, pos, len, opts)
+	opts = opts or {}
+	local item = { track = track, pos = pos, len = len, lane = opts.lane or 0, sel = opts.sel ~= false,
+		fadein = 0, fadeout = 0 }
+	item.take = { item = item, midi = false, file = opts.file or "C:/a/take.wav", offs = opts.offs or 0, name = "audio" }
+	table.insert(track, item)
+	return item
+end
+function H.midiItem(track, pos, len, notes, opts)
+	opts = opts or {}
+	local item = { track = track, pos = pos, len = len, lane = 0, sel = opts.sel ~= false, fadein = 0, fadeout = 0 }
+	item.take = { item = item, midi = true, notes = notes, name = "midi" }
+	table.insert(track, item)
+	return item
+end
+function H.itemsReaper(s)
+	local function selected()
+		local o = {}
+		for _, tr in ipairs(s.tracks) do for _, it in ipairs(tr) do if it.sel then o[#o + 1] = it end end end
+		return o
+	end
+	local function ppq(take, t) return (t - take.item.pos) * H.TPS end
+	return {
+		ImGui_GetBuiltinPath = function() return "." end,
+		GetExtState = function(sec, k) return s.ext[sec .. k] or "" end,
+		SetExtState = function(sec, k, v) s.ext[sec .. k] = v end,
+		MB = print,
+		MIDIEditor_GetActive = function() return s.editorTake and {} or nil end,
+		MIDIEditor_GetTake = function() return s.editorTake end,
+		ValidatePtr2 = function() return true end,
+		CountSelectedMediaItems = function() return #selected() end,
+		GetSelectedMediaItem = function(_, i) return selected()[i + 1] end,
+		GetActiveTake = function(it) return it.take end,
+		TakeIsMIDI = function(tk) return tk.midi end,
+		GetTakeName = function(tk) return tk.name end,
+		GetMediaItemTake_Item = function(tk) return tk.item end,
+		GetMediaItem_Track = function(it) return it.track end,
+		GetMediaItemInfo_Value = function(it, k)
+			return ({ D_POSITION = it.pos, D_LENGTH = it.len, I_FIXEDLANE = it.lane })[k]
+		end,
+		SetMediaItemInfo_Value = function(it, k, v)
+			if k == "D_LENGTH" then it.len = v elseif k == "D_POSITION" then it.pos = v elseif k == "D_FADEINLEN_AUTO" then it.fadein = v
+			elseif k == "D_FADEOUTLEN_AUTO" then it.fadeout = v
+			elseif k == "D_FADEINLEN" then it.fadeinManual = v elseif k == "D_FADEOUTLEN" then it.fadeoutManual = v end
+		end,
+		SetMediaItemSelected = function(it, v) it.sel = v end,
+		CountTrackMediaItems = function(tr) return #tr end,
+		GetTrackMediaItem = function(tr, i) return tr[i + 1] end,
+		DeleteTrackMediaItem = function(tr, it) for i, x in ipairs(tr) do if x == it then table.remove(tr, i) return true end end end,
+		GetMediaItemTake_Source = function(tk) return tk end,
+		GetMediaSourceParent = function() return nil end,
+		GetMediaSourceFileName = function(src) return src.file or "" end,
+		GetMediaItemTakeInfo_Value = function(tk, k)
+			if k == "D_STARTOFFS" then return tk.offs elseif k == "D_PLAYRATE" then return tk.rate or 1 end
+		end,
+		SetMediaItemTakeInfo_Value = function(tk, k, v) if k == "D_STARTOFFS" then tk.offs = v end end,
+		CountTakes = function() return 1 end,
+		GetTake = function(it) return it.take end,
+		TimeMap2_timeToQN = function(_, t) return t * 2 end, -- 120 bpm
+		TimeMap2_QNToTime = function(_, qn) return qn / 2 end,
+		-- MIDI takes (notes mode)
+		MIDI_GetPPQPosFromProjTime = ppq,
+		MIDI_GetProjTimeFromPPQPos = function(tk, p) return tk.item.pos + p / H.TPS end,
+		MIDI_CountEvts = function(tk) return 1, #tk.notes, 0, 0 end,
+		MIDI_GetNote = function(tk, i) local n = tk.notes[i + 1]; return true, n.sel or false, false, n.s, n.e, n.ch or 0, n.p, n.vel or 100 end,
+		MIDI_SetNote = function(tk, i, sel, _, _, e)
+			local n = tk.notes[i + 1]
+			if sel ~= nil then n.sel = sel end
+			if e then n.e = e end
+		end,
+		MIDI_DeleteNote = function(tk, i) table.remove(tk.notes, i + 1) end,
+		MIDI_Sort = function() end, MIDI_GetHash = function() return true, tostring(math.random()) end,
+		MarkTrackItemsDirty = function() end, UpdateItemInProject = function() end,
+		Undo_BeginBlock2 = function() end, Undo_EndBlock2 = function() end,
+		PreventUIRefresh = function() end, UpdateArrange = function() end,
+		GetProjectStateChangeCount = function() return math.random(1, 1e9) end,
 		defer = function(f) s.deferred = f end, atexit = function() end,
 	}
 end

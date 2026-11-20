@@ -8,6 +8,7 @@ local FILES = {
 	"fixoverlaps.lua",
 	"frameshift.lua",
 	"bakevolume.lua",
+	"items.lua",
 	"exporthelper.lua",
 }
 
