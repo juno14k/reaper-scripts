@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="Juno ReaPack Scripts" commit="51a010fb2561a384a39a0a5827c3fb5eee8a12e7">
+<index version="1" name="Juno ReaPack Scripts" commit="972b996f5979415e2a859882efcd041ea0c3e459">
   <category name="Items">
     <reapack name="juno_FrameShift.lua" type="script" desc="juno: Frame shift (move item content by frames)">
       <metadata>
@@ -32,19 +32,21 @@
     </reapack>
   </category>
   <category name="MIDI">
-    <reapack name="juno_ExtendNotes.lua" type="script" desc="juno: Extend notes to the next note">
+    <reapack name="juno_ExtendNotes.lua" type="script" desc="juno: Extend notes or items to the next one">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 juno: Extend Notes\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Extends every note so it ends where the next note starts (legato).\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Run it from the MIDI editor to work on the take being edited, or from the arrange view to work on the selected MIDI items. Only the selected notes are changed (all notes if none is selected).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab The next note can be the next note of any pitch, of the same pitch or of the same channel.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Notes that already overlap the next note can be trimmed or kept.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab An optional gap (ms, ticks or % of the distance) leaves some space before the next note.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab The last notes can be left alone or extended to the item end.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Extends every note so it ends where the next note starts (legato), or every item so it ends where the next item on its track starts.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 What it works on follows what you have in REAPER:\par}
+{\pard \ql \f0 \sa180 \li360 \fi-360 \bullet \tx360\tab the MIDI editor (or selected MIDI items): their notes. Only the selected notes are changed (all notes if none is selected);\par}
+{\pard \ql \f0 \sa180 \li360 \fi-360 \bullet \tx360\tab selected audio/video items: the items themselves, each up to the next item on the same track (and lane). MIDI items are never extended as items.\par}
+{\pard \ql \f0 \sa180 \li360 \fi-360 \bullet \tx360\tab The next note can be the next note of any pitch, of the same pitch or of the same channel; the next item can be the next item on the track or the next item from the same source file.\par}
+{\pard \ql \f0 \sa180 \li360 \fi-360 \bullet \tx360\tab Notes or items that already overlap the next one can be trimmed or kept.\par}
+{\pard \ql \f0 \sa180 \li360 \fi-360 \bullet \tx360\tab An optional gap (ms, ticks or % of the distance) leaves some space before the next one.\par}
+{\pard \ql \f0 \sa180 \li360 \fi-360 \bullet \tx360\tab The last notes can be left alone or extended to the item end. The last item on a track is left alone.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Requires ReaImGui (ReaTeam Extensions repository).\par}
 }
 ]]></description>
@@ -54,20 +56,28 @@
         <source main="main midi_editor">https://github.com/juno14k/reaper-scripts/raw/3dc4224261fae7caa515666ae6cab2fb31003b1a/MIDI/juno_ExtendNotes.lua</source>
         <source file="juno_ExtendNotes/core.lua">https://github.com/juno14k/reaper-scripts/raw/3dc4224261fae7caa515666ae6cab2fb31003b1a/MIDI/juno_ExtendNotes/core.lua</source>
       </version>
+      <version name="1.1.0" author="juno" time="2026-11-20T16:23:06Z">
+        <changelog><![CDATA[- Works on audio/video items too: run it with items selected in the arrange view to extend each item
+  to the next item on its track. MIDI items always have their notes extended, never the items.]]></changelog>
+        <source main="main midi_editor">https://github.com/juno14k/reaper-scripts/raw/972b996f5979415e2a859882efcd041ea0c3e459/MIDI/juno_ExtendNotes.lua</source>
+        <source file="juno_ExtendNotes/core.lua">https://github.com/juno14k/reaper-scripts/raw/972b996f5979415e2a859882efcd041ea0c3e459/MIDI/juno_ExtendNotes/core.lua</source>
+      </version>
     </reapack>
-    <reapack name="juno_FixOverlaps.lua" type="script" desc="juno: Fix overlapping, duplicate and short MIDI notes">
+    <reapack name="juno_FixOverlaps.lua" type="script" desc="juno: Fix overlapping, duplicate and short notes or items">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 juno: Fix Overlaps\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Cleans up MIDI, for example after importing or recording it.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Run it from the MIDI editor to work on the take being edited, or from the arrange view to work on the selected MIDI items. Only the selected notes are checked (all notes if none is selected).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Duplicates}: notes of the same pitch starting at (almost) the same time. The longest one is kept.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Short notes}: notes shorter than a given length, including zero-length notes.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Same-pitch overlaps}: the earlier note is trimmed to where the next one starts, or both are merged into one long note.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Monophonic overlaps} (optional): trims overlaps between different pitches too, for mono lines.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Cleans up MIDI (for example after importing or recording it) or items on the timeline.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 What it works on follows what you have in REAPER:\par}
+{\pard \ql \f0 \sa180 \li360 \fi-360 \bullet \tx360\tab the MIDI editor (or selected MIDI items): their notes. Only the selected notes are checked (all notes if none is selected);\par}
+{\pard \ql \f0 \sa180 \li360 \fi-360 \bullet \tx360\tab selected audio/video items: the items themselves, compared with the other selected items on the same track and lane. Duplicates are items of the same source file and part of the file starting together; overlapping items are trimmed, optionally leaving a crossfade. MIDI items are never fixed as items.\par}
+{\pard \ql \f0 \sa180 \li360 \fi-360 \bullet \tx360\tab {\b Duplicates}: notes of the same pitch starting at (almost) the same time. The longest one is kept.\par}
+{\pard \ql \f0 \sa180 \li360 \fi-360 \bullet \tx360\tab {\b Short notes}: notes shorter than a given length, including zero-length notes.\par}
+{\pard \ql \f0 \sa180 \li360 \fi-360 \bullet \tx360\tab {\b Same-pitch overlaps}: the earlier note is trimmed to where the next one starts, or both are merged into one long note.\par}
+{\pard \ql \f0 \sa180 \li360 \fi-360 \bullet \tx360\tab {\b Monophonic overlaps} (optional): trims overlaps between different pitches too, for mono lines.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Shows what it found before changing anything, and can select the affected notes so you can look at them.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Requires ReaImGui (ReaTeam Extensions repository).\par}
 }
@@ -77,6 +87,15 @@
         <changelog><![CDATA[Initial release.]]></changelog>
         <source main="main midi_editor">https://github.com/juno14k/reaper-scripts/raw/3dc4224261fae7caa515666ae6cab2fb31003b1a/MIDI/juno_FixOverlaps.lua</source>
         <source file="juno_FixOverlaps/core.lua">https://github.com/juno14k/reaper-scripts/raw/3dc4224261fae7caa515666ae6cab2fb31003b1a/MIDI/juno_FixOverlaps/core.lua</source>
+      </version>
+      <version name="1.1.0" author="juno" time="2026-11-20T16:23:06Z">
+        <changelog><![CDATA[- Works on audio/video items too: run it with items selected in the arrange view to remove duplicate and
+  short items and trim overlapping ones, with an optional crossfade. MIDI items always have their notes
+  fixed, never the items.
+- Option to keep or remove the existing fades of overlapping items when trimming them
+- Option to cut overlapping items at the start, middle or end of their overlap]]></changelog>
+        <source main="main midi_editor">https://github.com/juno14k/reaper-scripts/raw/972b996f5979415e2a859882efcd041ea0c3e459/MIDI/juno_FixOverlaps.lua</source>
+        <source file="juno_FixOverlaps/core.lua">https://github.com/juno14k/reaper-scripts/raw/972b996f5979415e2a859882efcd041ea0c3e459/MIDI/juno_FixOverlaps/core.lua</source>
       </version>
     </reapack>
     <reapack name="juno_MIDIExportHelper.lua" type="script" desc="juno: MIDI export helper (MIDI and pitched samples to MIDI tracks)">
